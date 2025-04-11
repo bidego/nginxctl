@@ -1,0 +1,289 @@
+#!/bin/bash
+
+# NGINX Admin Menu - Estilo DOS
+# Script para administrar NGINX local
+
+# Colores para el menú
+CYAN='\033[1;36m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+RED='\033[1;31m'
+NC='\033[0m' # No Color
+
+# Funciones
+clear_screen() {
+    clear
+    echo -e "${CYAN}╔══════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║               NGINX ADMIN MENU                   ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+check_nginx_status() {
+    if systemctl is-active --quiet nginx; then
+        echo -e "${GREEN}[ACTIVO]${NC}"
+    else
+        echo -e "${RED}[INACTIVO]${NC}"
+    fi
+}
+
+mostrar_sites_disponibles() {
+    clear_screen
+    echo -e "${YELLOW}SITIOS DISPONIBLES:${NC}"
+    echo -e "${CYAN}═════════════════════════════════════════════════${NC}"
+    
+    if [ -d /etc/nginx/sites-available ]; then
+        ls -1 /etc/nginx/sites-available
+    else
+        echo "Directorio de sitios disponibles no encontrado"
+    fi
+    
+    echo ""
+    read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+}
+
+mostrar_sites_habilitados() {
+    clear_screen
+    echo -e "${YELLOW}SITIOS HABILITADOS:${NC}"
+    echo -e "${CYAN}═════════════════════════════════════════════════${NC}"
+    
+    if [ -d /etc/nginx/sites-enabled ]; then
+        ls -1 /etc/nginx/sites-enabled
+    else
+        echo "Directorio de sitios habilitados no encontrado"
+    fi
+    
+    echo ""
+    read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+}
+
+mostrar_estado_nginx() {
+    clear_screen
+    echo -e "${YELLOW}ESTADO DE NGINX:${NC}"
+    echo -e "${CYAN}═════════════════════════════════════════════════${NC}"
+    
+    echo -e "Servicio NGINX: $(check_nginx_status)"
+    echo -e "${CYAN}───────────────────────────────────────────────────${NC}"
+    echo -e "${YELLOW}CONFIGURACIÓN ACTUAL:${NC}"
+    echo -e "${CYAN}───────────────────────────────────────────────────${NC}"
+    nginx -T | grep "server_name" | sort | uniq
+    
+    echo ""
+    echo -e "${YELLOW}PROCESOS EN EJECUCIÓN:${NC}"
+    ps aux | grep nginx | grep -v grep
+    
+    echo ""
+    read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+}
+
+reiniciar_nginx() {
+    clear_screen
+    echo -e "${YELLOW}REINICIANDO NGINX:${NC}"
+    echo -e "${CYAN}═════════════════════════════════════════════════${NC}"
+    
+    echo -n "Reiniciando servicio NGINX... "
+    if sudo systemctl restart nginx; then
+        echo -e "${GREEN}[OK]${NC}"
+    else
+        echo -e "${RED}[ERROR]${NC}"
+        echo "Verificando errores en la configuración:"
+        sudo nginx -t
+    fi
+    
+    echo ""
+    read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+}
+
+verificar_config() {
+    clear_screen
+    echo -e "${YELLOW}VERIFICANDO CONFIGURACIÓN DE NGINX:${NC}"
+    echo -e "${CYAN}═════════════════════════════════════════════════${NC}"
+    
+    echo "Ejecutando nginx -t para comprobar la sintaxis:"
+    sudo nginx -t
+    
+    echo ""
+    read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+}
+
+habilitar_sitio() {
+    clear_screen
+    echo -e "${YELLOW}HABILITAR SITIO NGINX:${NC}"
+    echo -e "${CYAN}═════════════════════════════════════════════════${NC}"
+    
+    if [ ! -d /etc/nginx/sites-available ] || [ ! -d /etc/nginx/sites-enabled ]; then
+        echo -e "${RED}Error: No se encontraron los directorios sites-available o sites-enabled${NC}"
+        read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+        return
+    fi
+    
+    echo -e "Sitios disponibles para habilitar:"
+    echo -e "${CYAN}───────────────────────────────────────────────────${NC}"
+    
+    # Listar sitios disponibles con números
+    sitios_disponibles=()
+    i=1
+    for sitio in $(ls -1 /etc/nginx/sites-available); do
+        # Comprobar si el sitio ya está habilitado
+        if [ -L "/etc/nginx/sites-enabled/$sitio" ]; then
+            echo -e "$i. $sitio ${GREEN}[Ya habilitado]${NC}"
+        else
+            echo -e "$i. $sitio"
+        fi
+        sitios_disponibles+=("$sitio")
+        ((i++))
+    done
+    
+    echo ""
+    
+    if [ ${#sitios_disponibles[@]} -eq 0 ]; then
+        echo -e "${RED}No hay sitios disponibles para habilitar${NC}"
+        read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+        return
+    fi
+    
+    echo -n "Ingrese el número del sitio a habilitar (o 0 para cancelar): "
+    read opcion
+    
+    if [[ "$opcion" =~ ^[0-9]+$ ]] && [ "$opcion" -ge 1 ] && [ "$opcion" -le ${#sitios_disponibles[@]} ]; then
+        sitio_seleccionado=${sitios_disponibles[$opcion-1]}
+        
+        # Verificar si el sitio ya está habilitado
+        if [ -L "/etc/nginx/sites-enabled/$sitio_seleccionado" ]; then
+            echo -e "${YELLOW}El sitio $sitio_seleccionado ya está habilitado${NC}"
+        else
+            echo -n "Habilitando sitio $sitio_seleccionado... "
+            if sudo ln -s "/etc/nginx/sites-available/$sitio_seleccionado" "/etc/nginx/sites-enabled/"; then
+                echo -e "${GREEN}[OK]${NC}"
+                echo -e "¿Desea reiniciar Nginx para aplicar cambios? (s/n): "
+                read -n 1 reiniciar
+                echo ""
+                if [[ "$reiniciar" == "s" || "$reiniciar" == "S" ]]; then
+                    echo -n "Reiniciando NGINX... "
+                    if sudo systemctl restart nginx; then
+                        echo -e "${GREEN}[OK]${NC}"
+                    else
+                        echo -e "${RED}[ERROR]${NC}"
+                        echo "Verificando errores en la configuración:"
+                        sudo nginx -t
+                    fi
+                fi
+            else
+                echo -e "${RED}[ERROR]${NC}"
+            fi
+        fi
+    elif [ "$opcion" -eq 0 ]; then
+        echo "Operación cancelada"
+    else
+        echo -e "${RED}Opción inválida${NC}"
+    fi
+    
+    echo ""
+    read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+}
+
+deshabilitar_sitio() {
+    clear_screen
+    echo -e "${YELLOW}DESHABILITAR SITIO NGINX:${NC}"
+    echo -e "${CYAN}═════════════════════════════════════════════════${NC}"
+    
+    if [ ! -d /etc/nginx/sites-enabled ]; then
+        echo -e "${RED}Error: No se encontró el directorio sites-enabled${NC}"
+        read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+        return
+    fi
+    
+    echo -e "Sitios habilitados que se pueden deshabilitar:"
+    echo -e "${CYAN}───────────────────────────────────────────────────${NC}"
+    
+    # Listar sitios habilitados con números
+    sitios_habilitados=()
+    i=1
+    for sitio in $(ls -1 /etc/nginx/sites-enabled); do
+        echo -e "$i. $sitio"
+        sitios_habilitados+=("$sitio")
+        ((i++))
+    done
+    
+    echo ""
+    
+    if [ ${#sitios_habilitados[@]} -eq 0 ]; then
+        echo -e "${RED}No hay sitios habilitados para deshabilitar${NC}"
+        read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+        return
+    fi
+    
+    echo -n "Ingrese el número del sitio a deshabilitar (o 0 para cancelar): "
+    read opcion
+    
+    if [[ "$opcion" =~ ^[0-9]+$ ]] && [ "$opcion" -ge 1 ] && [ "$opcion" -le ${#sitios_habilitados[@]} ]; then
+        sitio_seleccionado=${sitios_habilitados[$opcion-1]}
+        
+        echo -n "Deshabilitando sitio $sitio_seleccionado... "
+        if sudo rm "/etc/nginx/sites-enabled/$sitio_seleccionado"; then
+            echo -e "${GREEN}[OK]${NC}"
+            echo -e "¿Desea reiniciar Nginx para aplicar cambios? (s/n): "
+            read -n 1 reiniciar
+            echo ""
+            if [[ "$reiniciar" == "s" || "$reiniciar" == "S" ]]; then
+                echo -n "Reiniciando NGINX... "
+                if sudo systemctl restart nginx; then
+                    echo -e "${GREEN}[OK]${NC}"
+                else
+                    echo -e "${RED}[ERROR]${NC}"
+                    echo "Verificando errores en la configuración:"
+                    sudo nginx -t
+                fi
+            fi
+        else
+            echo -e "${RED}[ERROR]${NC}"
+        fi
+    elif [ "$opcion" -eq 0 ]; then
+        echo "Operación cancelada"
+    else
+        echo -e "${RED}Opción inválida${NC}"
+    fi
+    
+    echo ""
+    read -n 1 -s -r -p "Presione cualquier tecla para continuar..."
+}
+
+# Menú principal
+while true; do
+    clear_screen
+    echo -e "Estado actual de NGINX: $(check_nginx_status)"
+    echo ""
+    echo -e "${CYAN}[1]${NC} - Mostrar sitios disponibles"
+    echo -e "${CYAN}[2]${NC} - Mostrar sitios habilitados"
+    echo -e "${CYAN}[3]${NC} - Mostrar estado de NGINX"
+    echo -e "${CYAN}[4]${NC} - Reiniciar NGINX"
+    echo -e "${CYAN}[5]${NC} - Verificar configuración"
+    echo -e "${CYAN}[6]${NC} - Habilitar sitio"
+    echo -e "${CYAN}[7]${NC} - Deshabilitar sitio"
+    echo -e "${CYAN}[0]${NC} - Salir"
+    echo ""
+    echo -e "${CYAN}═════════════════════════════════════════════════${NC}"
+    
+    read -n 1 -p "Seleccione una opción: " opcion
+    echo ""
+    
+    case $opcion in
+        1) mostrar_sites_disponibles ;;
+        2) mostrar_sites_habilitados ;;
+        3) mostrar_estado_nginx ;;
+        4) reiniciar_nginx ;;
+        5) verificar_config ;;
+        6) habilitar_sitio ;;
+        7) deshabilitar_sitio ;;
+        0) 
+            clear
+            echo "Gracias por usar NGINX Admin Menu"
+            exit 0
+            ;;
+        *) 
+            clear_screen
+            echo -e "${RED}Opción inválida. Intente de nuevo.${NC}"
+            sleep 1
+            ;;
+    esac
+done
